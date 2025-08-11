@@ -26,8 +26,9 @@ import { L1Vault } from "./L1Vault.sol";
 
 contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+    //@audit-low this should be a constant variable
 
-    uint256 public DEPOSIT_LIMIT = 100_000 ether;
+    uint256 public DEPOSIT_LIMIT = 100_000 ether; //100K ETH
 
     IERC20 public immutable token;
     L1Vault public immutable vault;
@@ -36,6 +37,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
     error L1BossBridge__DepositLimitReached();
     error L1BossBridge__Unauthorized();
     error L1BossBridge__CallFailed();
+    //@audit-info no indexed variable
 
     event Deposit(address from, address to, uint256 amount);
 
@@ -68,6 +70,8 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param amount The amount of tokens to deposit
      */
     function depositTokensToL2(address from, address l2Recipient, uint256 amount) external whenNotPaused {
+        //@audit-med doesn't check that the from address is msg.sender, attacker can trigger deposit for any address
+        // that has approved the bridge
         if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
             revert L1BossBridge__DepositLimitReached();
         }
@@ -88,6 +92,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param r The r value of the signature
      * @param s The s value of the signature
      */
+    //@audit-high doesn't restrict the non-depositer to withdraw if they could get the signer to sign the their transaction
     function withdrawTokensToL1(address to, uint256 amount, uint8 v, bytes32 r, bytes32 s) external {
         sendToL1(
             v,
@@ -109,6 +114,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param s The s value of the signature
      * @param message The message/data to be sent to L1 (can be blank)
      */
+    //@audit-high signature replay attack
     function sendToL1(uint8 v, bytes32 r, bytes32 s, bytes memory message) public nonReentrant whenNotPaused {
         address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
 

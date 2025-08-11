@@ -17,6 +17,7 @@ contract TokenFactoryTest is Test {
     function testAddToken() public {
         vm.prank(owner);
         address tokenAddress = tokenFactory.deployToken("TEST", type(L1Token).creationCode);
+        console2.log("tokenAddress: ", tokenAddress);
         assertEq(tokenFactory.getTokenAddressFromSymbol("TEST"), tokenAddress);
     }
 }
