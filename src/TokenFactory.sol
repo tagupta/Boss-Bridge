@@ -21,8 +21,13 @@ contract TokenFactory is Ownable {
      * @param contractBytecode The bytecode of the new token
      */
     //@audit-high assembly code will never work because contracts cannot be deployed on EraVM using any kind of bytecode
-    //@note EraVM does not use bytecode for contract deployment. Instead, it refers to contracts using their bytecode hashes. In order to deploy a contract, please use the `new` operator in Solidity instead of raw 'create'/'create2' in assembly
+    //@note https://docs.zksync.io/zksync-protocol/differences/evm-instructions
+    //@note EraVM does not use bytecode for contract deployment. Instead, it refers to contracts using their bytecode
+    // hashes. In order to deploy a contract, please use the `new` operator in Solidity instead of raw
+    // 'create'/'create2' in assembly
+    //@audit-low this can be masked as external rather public
     function deployToken(string memory symbol, bytes memory contractBytecode) public onlyOwner returns (address addr) {
+        //@audit-q are you sure you want this out of scope. There could be better ways to do this.
         assembly {
             addr := create(0, add(contractBytecode, 0x20), mload(contractBytecode))
         }
@@ -30,6 +35,7 @@ contract TokenFactory is Ownable {
         emit TokenDeployed(symbol, addr);
     }
 
+    //@audit-low this can be masked as external rather public
     function getTokenAddressFromSymbol(string memory symbol) public view returns (address addr) {
         return s_tokenToAddress[symbol];
     }

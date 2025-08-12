@@ -8,6 +8,7 @@ remappings = [
     '@openzeppelin/contracts=lib/openzeppelin-contracts/contracts',
     'erc4626-tests/=lib/openzeppelin-contracts/lib/erc4626-tests/',
     'forge-std/=lib/forge-std/src/',
+    'ds-test/=lib/forge-std/lib/ds-test/src/'
 ]
 
 [fmt]
@@ -19,3 +20,11 @@ number_underscore = "thousands"
 quote_style = "double"
 tab_width = 4
 wrap_comments = true
+
+[fuzz]
+seed = "0x1"
+
+[invariant]
+runs = 1000
+depth = 32
+fail_on_revert = true

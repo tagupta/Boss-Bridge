@@ -26,8 +26,8 @@ import { L1Vault } from "./L1Vault.sol";
 
 contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
-    //@audit-low this should be a constant variable
 
+    //@audit-info this should be a constant variable
     uint256 public DEPOSIT_LIMIT = 100_000 ether; //100K ETH
 
     IERC20 public immutable token;
@@ -56,6 +56,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
         _unpause();
     }
 
+    //@audit-q what happens if we disable the account mid-flight?
     function setSigner(address account, bool enabled) external onlyOwner {
         signers[account] = enabled;
     }
@@ -69,8 +70,14 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param l2Recipient The address of the user who will receive the tokens on L2
      * @param amount The amount of tokens to deposit
      */
+    //@audit-high doesn't check that the from address is msg.sender, attacker can trigger deposit for any address to - MEV attack
+    // steal funds to his account
+    //@note Alice => approve (address(bridge), amount);
+    //Bob => saw depositTokensToL2 transaction from Alice and fron-runs this transaction with his own recipient address
+    //Bob => depositTokensToL2(from: Alice, l2Recipient: Bob, amount)
+    //@audit-high from: vault, l2Recipient: attacker, since vault is giving infinite amount of approval to bridge
+    //@audit-high limit of DEPOSIT_LIMIT can cause DOS for users
     function depositTokensToL2(address from, address l2Recipient, uint256 amount) external whenNotPaused {
-        //@audit-med doesn't check that the from address is msg.sender, attacker can trigger deposit for any address
         // that has approved the bridge
         if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
             revert L1BossBridge__DepositLimitReached();
@@ -78,6 +85,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
         token.safeTransferFrom(from, address(vault), amount);
 
         // Our off-chain service picks up this event and mints the corresponding tokens on L2
+        //@audit-info should follow CEI
         emit Deposit(from, l2Recipient, amount);
     }
 
@@ -92,7 +100,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param r The r value of the signature
      * @param s The s value of the signature
      */
-    //@audit-high doesn't restrict the non-depositer to withdraw if they could get the signer to sign the their transaction
+    //@audit-high no check to make sure that the user is allowed to withdraw only the deposited amount
     function withdrawTokensToL1(address to, uint256 amount, uint8 v, bytes32 r, bytes32 s) external {
         sendToL1(
             v,
@@ -123,7 +131,8 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
         }
 
         (address target, uint256 value, bytes memory data) = abi.decode(message, (address, uint256, bytes));
-
+         //@audit-med if user could get signer to sign some malicious message
+         //@audit-med gas bomb - pass some crazy data and cost the signers a lot of gas
         (bool success,) = target.call{ value: value }(data);
         if (!success) {
             revert L1BossBridge__CallFailed();
