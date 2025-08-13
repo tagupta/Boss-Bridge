@@ -26,10 +26,8 @@ contract InvariantTest is StdInvariant, Test {
         address initialUserL2 = makeAddr("initalUserL2");
         deal(address(token), address(this), initialLiquidity);
 
-       
         token.approve(address(bridge), initialLiquidity);
         bridge.depositTokensToL2(address(this), initialUserL2, initialLiquidity);
-      
 
         bytes4[] memory targetSelectors = new bytes4[](2);
         targetSelectors[0] = handler.depositToBridge.selector;

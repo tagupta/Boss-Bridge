@@ -20,7 +20,8 @@ contract TokenFactory is Ownable {
      * @param symbol The symbol of the new token
      * @param contractBytecode The bytecode of the new token
      */
-    //@report-written assembly code will never work because contracts cannot be deployed on EraVM using any kind of bytecode
+    //@report-written assembly code will never work because contracts cannot be deployed on EraVM using any kind of
+    // bytecode
     //@report-writtenthis can be masked as external rather public
     function deployToken(string memory symbol, bytes memory contractBytecode) public onlyOwner returns (address addr) {
         assembly {

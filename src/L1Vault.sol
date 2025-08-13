@@ -10,15 +10,14 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 /// @notice It will approve the bridge to move money in and out of this contract
 /// @notice It's owner should be the bridge
 contract L1Vault is Ownable {
-    //@audit-low this should be immutable
+    //@report-written this should be immutable
     IERC20 public token;
 
     constructor(IERC20 _token) Ownable(msg.sender) {
         token = _token;
     }
 
-    //@audit-q why creating a function, when it could just give hard code approval to bridge contract?
-    //@audit-info should check the return value of approve
+    //@report-written should check the return value of approve
     function approveTo(address target, uint256 amount) external onlyOwner {
         token.approve(target, amount);
     }

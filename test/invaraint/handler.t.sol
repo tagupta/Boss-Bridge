@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import { Test,console2 } from "forge-std/Test.sol";
+import { Test, console2 } from "forge-std/Test.sol";
 import { L1BossBridge } from "src/L1BossBridge.sol";
 import { L1Token } from "src/L1Token.sol";
 import { L1Vault } from "src/L1Vault.sol";
@@ -21,7 +21,7 @@ contract Handler is Test {
     uint256 public userDeposits;
     uint256 public userWithdrawals;
     uint256 public vaultBalances; // Tracks expected vault balance per user
-    
+
     address user = makeAddr("user");
 
     constructor(address bridge, uint256 key) {
@@ -42,7 +42,7 @@ contract Handler is Test {
         vm.stopPrank();
 
         userDeposits += amount;
-        vaultBalances =  vaultBalance + amount;
+        vaultBalances = vaultBalance + amount;
     }
 
     function withdrawFromBridge(uint256 amount) external {
@@ -51,7 +51,7 @@ contract Handler is Test {
 
         amount = bound(amount, 0, userDeposits);
         vm.assume(i_token.balanceOf(address(i_vault)) >= amount);
-        (uint8 v,bytes32 r,bytes32 s) = _createSignedWithdrawal(user, amount);
+        (uint8 v, bytes32 r, bytes32 s) = _createSignedWithdrawal(user, amount);
         vm.prank(user);
         i_bridge.withdrawTokensToL1(user, amount, v, r, s);
 

